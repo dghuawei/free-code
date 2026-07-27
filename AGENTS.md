@@ -205,3 +205,12 @@ consistency with established project conventions beats introducing a second styl
   Predictability is the point.
 - **MUST** delete an abstraction when removing it makes the code easier to read,
   change, and verify without losing a real invariant.
+
+## Git/PR Workflow
+- Recent human commit format: (type) imperative summary.
+- Examples from this repo: (feat) add deployment script, (fix) add shebang to index.ts for execution in github actions, (chore) bump cli version.
+- AI-created commit format when the user asks for a commit: (type) (openai/gpt-5.5, reviewed T|F, tested T|F) imperative summary.
+- Before creating an AI commit, ask the user whether a human reviewed the changes so reviewed T|F is accurate.
+- Mark tested T only after the relevant checks have run successfully. Otherwise use tested F.
+- Before committing, inspect git status --short, git diff, and git log --oneline -10; stage only intended files.
+- Run git diff --check before commit/PR handoff.
