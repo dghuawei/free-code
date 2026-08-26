@@ -8,6 +8,7 @@ import { filterToolProgressMessages, type Tool, type Tools } from '../../../Tool
 import type { NormalizedUserMessage, ProgressMessage } from '../../../types/message.js';
 import { deleteClassifierApproval, getClassifierApproval, getYoloClassifierApproval } from '../../../utils/classifierApprovals.js';
 import type { buildMessageLookups } from '../../../utils/messages.js';
+import { TOOL_OUTPUT_SUMMARY_TAG } from '../../../services/toolResultSummarization/tags.js';
 import { MessageResponse } from '../../MessageResponse.js';
 import { HookProgressMessage } from '../HookProgressMessage.js';
 type Props = {
@@ -22,6 +23,43 @@ type Props = {
   width: number | string;
   isTranscriptMode?: boolean;
 };
+
+/**
+ * When tool-output summarization replaced this result's model-bound content,
+ * return the persisted raw-output filepath for the UI badge (empty string if
+ * summarized but no path found), else null. The rendered output above stays
+ * raw (toolUseResult), so the badge is the only on-screen signal that the
+ * model actually received a summary. Structural access + runtime guards
+ * because the transcript path may deserialize without types.
+ */
+export function getSummarizedOutputPath(
+  message: NormalizedUserMessage,
+  toolUseID: string,
+): string | null {
+  const content = (message as { message?: { content?: unknown } }).message
+    ?.content;
+  if (!Array.isArray(content)) return null;
+  const block = content.find(
+    (b: { type?: string; tool_use_id?: string; content?: unknown }) =>
+      b?.type === 'tool_result' && b?.tool_use_id === toolUseID,
+  );
+  const blockContent = block?.content;
+  if (
+    typeof blockContent !== 'string' ||
+    !blockContent.startsWith(TOOL_OUTPUT_SUMMARY_TAG)
+  ) {
+    return null;
+  }
+  const match = blockContent.match(/saved to: (.+)$/m);
+  return match?.[1] ?? '';
+}
+
+/** Keep the badge to one terminal line for very long session paths. */
+function truncatePathForBadge(path: string): string {
+  const MAX = 60;
+  if (path.length <= MAX) return path;
+  return `…${path.slice(-(MAX - 1))}`;
+}
 export function UserToolSuccessMessage({
   message,
   lookups,
@@ -82,9 +120,19 @@ export function UserToolSuccessMessage({
   // so MarkdownTable's SAFETY_MARGIN=4 (tuned for the assistant-text 2-col
   // dot gutter) holds — otherwise tables wrap their box-drawing chars.
   const rendersAsAssistantText = tool.userFacingName(undefined) === '';
+  const summarizedOutputPath = getSummarizedOutputPath(message, toolUseID);
   return <Box flexDirection="column">
       <Box flexDirection="column" width={rendersAsAssistantText ? undefined : width}>
         {renderedMessage}
+        {summarizedOutputPath !== null ? <MessageResponse height={1}>
+                <Text dimColor>
+                  <Text color="success">{figures.tick}</Text>
+                  {' Summarized for model context \u00b7 full output: '}
+                  {summarizedOutputPath
+                    ? truncatePathForBadge(summarizedOutputPath)
+                    : 'saved to session tool-results'}
+                </Text>
+              </MessageResponse> : null}
         {feature('BASH_CLASSIFIER') ? classifierRule && <MessageResponse height={1}>
                 <Text dimColor>
                   <Text color="success">{figures.tick}</Text>

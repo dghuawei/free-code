@@ -16,6 +16,7 @@ import { BYTES_PER_TOKEN } from '../../constants/toolLimits.js'
 import { logEvent } from '../analytics/index.js'
 import { sanitizeToolNameForAnalytics } from '../analytics/metadata.js'
 import { createChildAbortController } from '../../utils/abortController.js'
+import { logForDebugging } from '../../utils/debug.js'
 import { toError } from '../../utils/errors.js'
 import { formatFileSize } from '../../utils/format.js'
 import { logError } from '../../utils/log.js'
@@ -195,6 +196,13 @@ export async function maybeSummarizeToolResultBlock({
       estimatedOriginalTokens: estimatedTokens,
       estimatedSummarizedTokens: Math.ceil(replacement.length / BYTES_PER_TOKEN),
     })
+    // Visible with -d/--debug: confirms the model context got the summary,
+    // not the raw output (the terminal UI still renders the raw output from
+    // toolUseResult by design).
+    logForDebugging(
+      `Summarized ${toolName} output: ${text.length} chars / ${lineCount} lines -> ${replacement.length} chars (saved to ${persisted.filepath})`,
+      { level: 'info' },
+    )
 
     return { ...toolResultBlock, content: replacement }
   } catch (error) {
