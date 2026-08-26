@@ -1059,6 +1059,70 @@ export const SettingsSchema = lazySchema(() =>
             'Only applies to User, Project, and Local memory types (Managed/policy files cannot be excluded). ' +
             'Examples: "/home/user/monorepo/CLAUDE.md", "**/code/CLAUDE.md", "**/some-dir/.claude/rules/**"',
         ),
+      toolOutputSummarization: z
+        .object({
+          enabled: z
+            .boolean()
+            .optional()
+            .describe(
+              'Summarize long tool outputs with a background model call before they enter the conversation context. ' +
+                'The raw output is persisted to the session tool-results directory and referenced by path. ' +
+                'Default: true.',
+            ),
+          tokenThreshold: z
+            .number()
+            .int()
+            .min(100)
+            .optional()
+            .describe(
+              'Estimated token count above which a tool output is summarized ' +
+                '(estimated at 4 chars per token). Default: 2500.',
+            ),
+          lineThreshold: z
+            .number()
+            .int()
+            .min(1)
+            .optional()
+            .describe(
+              'Line count above which a tool output is summarized. ' +
+                'Summarization triggers when EITHER this or tokenThreshold is exceeded. Default: 300.',
+            ),
+          model: z
+            .string()
+            .optional()
+            .describe(
+              'Model used for summarization. Default: the small/fast model (Haiku class).',
+            ),
+          ignoredTools: z
+            .array(z.string())
+            .optional()
+            .describe(
+              'Tool names whose outputs are never summarized (e.g. ["Read", "Task"]). ' +
+                'MCP tools use their mcp__server__tool name. Arrays from multiple settings sources are combined.',
+            ),
+          maxInputChars: z
+            .number()
+            .int()
+            .min(1000)
+            .optional()
+            .describe(
+              'Cap on characters of raw output sent to the summarizer prompt ' +
+                '(the persisted full output is unaffected). Default: 200000.',
+            ),
+          timeoutMs: z
+            .number()
+            .int()
+            .min(1000)
+            .optional()
+            .describe(
+              'Summarization call timeout. On timeout the raw output enters context unchanged. Default: 30000.',
+            ),
+        })
+        .optional()
+        .describe(
+          'Background summarization of long tool outputs to keep context lean. ' +
+            'Applies to the main conversation only (not subagent sidechains).',
+        ),
       pluginTrustMessage: z
         .string()
         .optional()

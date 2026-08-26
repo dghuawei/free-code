@@ -15,6 +15,7 @@ import {
 import { getFeatureValue_CACHED_MAY_BE_STALE } from '../services/analytics/growthbook.js'
 import { logEvent } from '../services/analytics/index.js'
 import { sanitizeToolNameForAnalytics } from '../services/analytics/metadata.js'
+import { TOOL_OUTPUT_SUMMARY_TAG } from '../services/toolResultSummarization/tags.js'
 import type { Message } from '../types/message.js'
 import { logForDebugging } from './debug.js'
 import { getErrnoCode, toError } from './errors.js'
@@ -495,16 +496,27 @@ type CandidatePartition = {
   fresh: ToolResultCandidate[]
 }
 
-function isContentAlreadyCompacted(
+/**
+ * True when a tool_result's content has already been replaced by a compaction
+ * mechanism (the 50k persistence path or tool-output summarization), meaning
+ * it must not be re-processed. Exported for the summarizer's eligibility
+ * check so both mechanisms share one definition of "already compacted".
+ */
+export function isContentAlreadyCompacted(
   content: ToolResultBlockParam['content'],
 ): boolean {
-  // All budget-produced content starts with the tag (buildLargeToolResultMessage).
+  // All budget-produced content starts with the tag (buildLargeToolResultMessage),
+  // summarized content starts with its own tag (buildSummarizedContent).
   // `.startsWith()` avoids false-positives when the tag appears anywhere else
   // in the content (e.g., reading this source file).
-  return typeof content === 'string' && content.startsWith(PERSISTED_OUTPUT_TAG)
+  return (
+    typeof content === 'string' &&
+    (content.startsWith(PERSISTED_OUTPUT_TAG) ||
+      content.startsWith(TOOL_OUTPUT_SUMMARY_TAG))
+  )
 }
 
-function hasImageBlock(
+export function hasImageBlock(
   content: NonNullable<ToolResultBlockParam['content']>,
 ): boolean {
   return (

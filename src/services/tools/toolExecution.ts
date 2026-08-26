@@ -102,10 +102,8 @@ import {
   formatError,
   formatZodValidationError,
 } from '../../utils/toolErrors.js'
-import {
-  processPreMappedToolResultBlock,
-  processToolResultBlock,
-} from '../../utils/toolResultStorage.js'
+import { processPreMappedToolResultBlock } from '../../utils/toolResultStorage.js'
+import { maybeSummarizeToolResultBlock } from '../toolResultSummarization/summarizeToolResult.js'
 import {
   extractDiscoveredToolNames,
   isToolSearchEnabledOptimistic,
@@ -1404,15 +1402,30 @@ async function checkPermissionsAndCallTool(
       toolUseResult: unknown,
       preMappedBlock?: ToolResultBlockParam,
     ) {
-      // Use the pre-mapped block when available (non-MCP tools where hooks
-      // don't modify the output), otherwise map from scratch.
-      const toolResultBlock = preMappedBlock
-        ? await processPreMappedToolResultBlock(
-            preMappedBlock,
-            tool.name,
-            tool.maxResultSizeChars,
-          )
-        : await processToolResultBlock(tool, toolUseResult, toolUseID)
+      // Map once: use the pre-mapped block when available (non-MCP tools
+      // where hooks don't modify the output), otherwise map from scratch.
+      const blockToProcess =
+        preMappedBlock ??
+        tool.mapToolResultToToolResultBlockParam(toolUseResult, toolUseID)
+
+      // Opportunistic summarization of long outputs runs BEFORE the
+      // persistence pass: a successful summary is short, tagged content the
+      // persistence pass leaves untouched (isContentAlreadyCompacted); any
+      // decline/failure returns undefined and the raw output flows through
+      // the original path unchanged (fail open).
+      const summarizedBlock = await maybeSummarizeToolResultBlock({
+        toolResultBlock: blockToProcess,
+        toolName: tool.name,
+        toolInput: input,
+        parentAbortController: toolUseContext.abortController,
+        isSubagent: Boolean(toolUseContext.agentId),
+      })
+
+      const toolResultBlock = await processPreMappedToolResultBlock(
+        summarizedBlock ?? blockToProcess,
+        tool.name,
+        tool.maxResultSizeChars,
+      )
 
       // Build content blocks - tool result first, then optional feedback
       const contentBlocks: ContentBlockParam[] = [toolResultBlock]
