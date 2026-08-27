@@ -155,6 +155,10 @@ export async function maybeSummarizeToolResultBlock({
   if (parentAbortController.signal.aborted) return undefined
   const { text, lineCount, estimatedTokens } = eligibility
 
+  // Timeout flag is hoisted above the try so the catch can distinguish a
+  // timeout abort (SDK rewrites it to a generic "Request was aborted") from
+  // other failures.
+  let timedOut = false
   try {
     // Persist the raw output first so the summary can reference it for
     // recovery. Idempotent ('wx' + EEXIST reuse), so the fallback persistence
@@ -168,13 +172,12 @@ export async function maybeSummarizeToolResultBlock({
     const summarizerAbort = createChildAbortController(parentAbortController)
     // Bounded wait: on timeout the raw output enters context instead. The
     // summarizer's own retries share this budget.
-    const timeout = setTimeout(
-      () =>
-        summarizerAbort.abort(
-          new Error('tool result summarization timed out'),
-        ),
-      config.timeoutMs,
-    )
+    const timeout = setTimeout(() => {
+      timedOut = true
+      summarizerAbort.abort(
+        new Error('tool result summarization timed out'),
+      )
+    }, config.timeoutMs)
 
     let summaryText: string
     try {
@@ -270,8 +273,19 @@ export async function maybeSummarizeToolResultBlock({
 
     return { ...toolResultBlock, content: replacement }
   } catch (error) {
-    // Fail open: log for observability, keep raw output.
-    logError(toError(error))
+    // Fail open: log for observability, keep raw output. Timeouts get a
+    // distinct message — the SDK rewrites the abort into a generic
+    // "Request was aborted", which is indistinguishable from user
+    // cancellation in the raw error alone.
+    if (timedOut) {
+      logForDebugging(
+        `Summarizer call timed out after ${config.timeoutMs}ms for ${toolName} ` +
+          `— keeping raw output (model=${config.model}, stream=${config.streaming})`,
+        { level: 'warn' },
+      )
+    } else {
+      logError(toError(error))
+    }
     return undefined
   }
 }
