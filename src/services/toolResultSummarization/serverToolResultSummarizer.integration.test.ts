@@ -15,6 +15,8 @@ const FIXED_CONFIG = {
   timeoutMs: 5_000,
   summarizeServerToolResults: true,
   noThinkPromptSuffix: "",
+  maxOutputTokens: 1024,
+  streaming: false,
 }
 
 mock.module('./config.js', () => ({

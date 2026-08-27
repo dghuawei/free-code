@@ -59,6 +59,13 @@ export type SideQueryOptions = {
   thinking?: number | false
   /** Stop sequences — generation stops when any of these strings is emitted */
   stop_sequences?: string[]
+  /**
+   * Use the streaming request path and return the final assembled message.
+   * Needed for gateways that only populate content on streamed responses
+   * (observed with reasoning models behind OpenAI-compatible bridges:
+   * non-streaming calls return 200 with an empty text block).
+   */
+  stream?: boolean
   /** Attributes this call in tengu_api_success for COGS joining against reporting.sampling_calls. */
   querySource: QuerySource
 }
@@ -119,6 +126,7 @@ export async function sideQuery(opts: SideQueryOptions): Promise<BetaMessage> {
     temperature,
     thinking,
     stop_sequences,
+    stream,
   } = opts
 
   const client = await getAnthropicClient({
@@ -178,24 +186,26 @@ export async function sideQuery(opts: SideQueryOptions): Promise<BetaMessage> {
 
   const normalizedModel = normalizeModelStringForAPI(model)
   const start = Date.now()
+  const requestParams = {
+    model: normalizedModel,
+    max_tokens,
+    system: systemBlocks,
+    messages,
+    ...(tools && { tools }),
+    ...(tool_choice && { tool_choice }),
+    ...(output_format && { output_config: { format: output_format } }),
+    ...(temperature !== undefined && { temperature }),
+    ...(stop_sequences && { stop_sequences }),
+    ...(thinkingConfig && { thinking: thinkingConfig }),
+    ...(betas.length > 0 && { betas }),
+    metadata: getAPIMetadata(),
+  }
   // biome-ignore lint/plugin: this IS the wrapper that handles OAuth attribution
-  const response = await client.beta.messages.create(
-    {
-      model: normalizedModel,
-      max_tokens,
-      system: systemBlocks,
-      messages,
-      ...(tools && { tools }),
-      ...(tool_choice && { tool_choice }),
-      ...(output_format && { output_config: { format: output_format } }),
-      ...(temperature !== undefined && { temperature }),
-      ...(stop_sequences && { stop_sequences }),
-      ...(thinkingConfig && { thinking: thinkingConfig }),
-      ...(betas.length > 0 && { betas }),
-      metadata: getAPIMetadata(),
-    },
-    { signal },
-  )
+  const response = stream
+    ? await client.beta.messages
+        .stream(requestParams, { signal })
+        .finalMessage()
+    : await client.beta.messages.create(requestParams, { signal })
 
   const requestId =
     (response as { _request_id?: string | null })._request_id ?? undefined

@@ -10,6 +10,7 @@ export const DEFAULT_TOKEN_THRESHOLD = 2500
 export const DEFAULT_LINE_THRESHOLD = 300
 export const DEFAULT_MAX_INPUT_CHARS = 200_000
 export const DEFAULT_TIMEOUT_MS = 30_000
+export const DEFAULT_MAX_OUTPUT_TOKENS = 1024
 
 export type ToolOutputSummarizationConfig = {
   enabled: boolean
@@ -22,6 +23,10 @@ export type ToolOutputSummarizationConfig = {
   summarizeServerToolResults: boolean
   /** Appended to the summarizer system prompt; Qwen3 soft switch is "/no_think" */
   noThinkPromptSuffix: string
+  /** max_tokens for the summarizer call; raise for reasoning models */
+  maxOutputTokens: number
+  /** Stream the summarizer call; for gateways that only populate content on streams */
+  streaming: boolean
 }
 
 /**
@@ -43,5 +48,7 @@ export function getToolOutputSummarizationConfig(): ToolOutputSummarizationConfi
     timeoutMs: setting.timeoutMs ?? DEFAULT_TIMEOUT_MS,
     summarizeServerToolResults: setting.summarizeServerToolResults === true,
     noThinkPromptSuffix: setting.noThinkPromptSuffix ?? '',
+    maxOutputTokens: setting.maxOutputTokens ?? DEFAULT_MAX_OUTPUT_TOKENS,
+    streaming: setting.streaming === true,
   }
 }

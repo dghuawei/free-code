@@ -18,6 +18,8 @@ const FIXED_CONFIG = {
   timeoutMs: 30_000,
   summarizeServerToolResults: false,
   noThinkPromptSuffix: '',
+  maxOutputTokens: 1024,
+  streaming: false,
 }
 
 mock.module('../../services/toolResultSummarization/config.js', () => ({
@@ -130,6 +132,25 @@ describe('maybeSummarizeToolResultBlock', () => {
     // otherwise burn the whole max_tokens budget on reasoning and return
     // zero text blocks — the silent-skip failure mode observed in production.
     expect(seenOpts?.thinking).toBe(false)
+  })
+
+  test('reasoning-gateway workarounds: maxOutputTokens and streaming reach sideQuery', async () => {
+    let seen: Record<string, unknown> | undefined
+    sideQueryMock.mockImplementationOnce(async (opts: unknown) => {
+      seen = opts as Record<string, unknown>
+      return { content: [{ type: 'text', text: 'ok summary' }] }
+    })
+    FIXED_CONFIG.maxOutputTokens = 4096
+    FIXED_CONFIG.streaming = true
+    try {
+      const result = await maybeSummarizeToolResultBlock(baseParams())
+      expect(result).toBeDefined()
+      expect(seen?.max_tokens).toBe(4096)
+      expect(seen?.stream).toBe(true)
+    } finally {
+      FIXED_CONFIG.maxOutputTokens = 1024
+      FIXED_CONFIG.streaming = false
+    }
   })
 
   test('noThinkPromptSuffix is appended to the system prompt (Qwen3 soft switch)', async () => {

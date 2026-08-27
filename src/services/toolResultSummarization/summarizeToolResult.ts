@@ -198,13 +198,16 @@ export async function maybeSummarizeToolResultBlock({
             }),
           },
         ],
-        max_tokens: 1024,
+        max_tokens: config.maxOutputTokens,
         maxRetries: 1,
         // Thinking models (qwen, deepseek-r1, …) burn the entire token
         // budget on reasoning and return ZERO text blocks — observed live:
         // 200 OK with empty content, silently skipping every summarization.
         // Compaction output must be plain text.
         thinking: false,
+        // Some OpenAI-compatible gateways only populate content on streamed
+        // responses; config.streaming opts this call into the stream path.
+        stream: config.streaming,
         signal: summarizerAbort.signal,
         querySource: 'tool_result_summarization',
       })

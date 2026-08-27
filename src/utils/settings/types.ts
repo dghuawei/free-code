@@ -1138,6 +1138,24 @@ export const SettingsSchema = lazySchema(() =>
                 'ignores the thinking:disabled API flag. For Qwen3-family models use "/no_think". ' +
                 'Leave unset for Anthropic/OpenAI models. Default: empty.',
             ),
+          maxOutputTokens: z
+            .number()
+            .int()
+            .min(256)
+            .optional()
+            .describe(
+              'max_tokens for the summarizer call. Raise when the summarizer model reasons: ' +
+                'a reasoning model that exhausts the budget before emitting text returns an empty ' +
+                'summary and the raw output is kept (visible as "Summarizer returned no text"). Default: 1024.',
+            ),
+          streaming: z
+            .boolean()
+            .optional()
+            .describe(
+              'Make the summarizer call over the streaming request path. Needed for gateways that only ' +
+                'populate response content on streamed calls (observed with reasoning models behind ' +
+                'OpenAI-compatible bridges). Default: false.',
+            ),
         })
         .optional()
         .describe(
