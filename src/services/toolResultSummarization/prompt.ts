@@ -9,7 +9,11 @@ You receive a tool name, its inputs, and the full output.
 
 Rules:
 1. State the outcome first: success, failure, partial, or empty result.
-2. Preserve verbatim anything the agent must reuse or reference exactly: file paths, line numbers, error messages, stack-trace frames, exit codes, identifiers, URLs, commands, counts, and changed values.
+2. Preserve verbatim anything the agent must reuse or reference exactly:
+   file paths, line numbers, error messages, stack-trace frames, exit codes,
+   identifiers, callable tool names (e.g. dynamically registered bapi__ or
+   mcp__ tools — the agent invokes them by exact name), URLs, commands,
+   counts, and changed values.
 3. Keep structure that aids scanning: terse bullets; preserve section order when it carries meaning (e.g. test file grouping).
 4. Drop: decorative output, progress indicators, timestamps, banners, repeated similar lines (report the pattern, a count, and one example), and data the agent cannot act on.
 5. If the output reveals a problem, quote the single most diagnostic line.
