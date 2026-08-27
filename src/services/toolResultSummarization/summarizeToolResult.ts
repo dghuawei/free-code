@@ -181,7 +181,9 @@ export async function maybeSummarizeToolResultBlock({
       const truncated = text.length > config.maxInputChars
       const response = await sideQuery({
         model: config.model,
-        system: TOOL_OUTPUT_SUMMARY_SYSTEM_PROMPT,
+        system: config.noThinkPromptSuffix
+          ? `${TOOL_OUTPUT_SUMMARY_SYSTEM_PROMPT}\n\n${config.noThinkPromptSuffix}`
+          : TOOL_OUTPUT_SUMMARY_SYSTEM_PROMPT,
         skipSystemPromptPrefix: true,
         messages: [
           {
@@ -198,6 +200,11 @@ export async function maybeSummarizeToolResultBlock({
         ],
         max_tokens: 1024,
         maxRetries: 1,
+        // Thinking models (qwen, deepseek-r1, …) burn the entire token
+        // budget on reasoning and return ZERO text blocks — observed live:
+        // 200 OK with empty content, silently skipping every summarization.
+        // Compaction output must be plain text.
+        thinking: false,
         signal: summarizerAbort.signal,
         querySource: 'tool_result_summarization',
       })
@@ -206,6 +213,18 @@ export async function maybeSummarizeToolResultBlock({
         .map(block => (block.type === 'text' ? block.text : ''))
         .join('')
         .trim()
+      if (!summaryText) {
+        // Make this failure mode visible: a 200-with-no-text response is the
+        // signature of a reasoning model (thinking not disabled server-side)
+        // or a gateway that drops text blocks. Without this line the skip is
+        // completely silent.
+        const blockTypes = response.content.map(b => b.type).join(', ')
+        logForDebugging(
+          `Summarizer returned no text for ${toolName} ` +
+            `(content blocks: [${blockTypes || 'none'}]) — keeping raw output`,
+          { level: 'warn' },
+        )
+      }
     } finally {
       clearTimeout(timeout)
     }

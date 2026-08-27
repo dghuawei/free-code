@@ -14,6 +14,7 @@ const FIXED_CONFIG = {
   maxInputChars: 200_000,
   timeoutMs: 5_000,
   summarizeServerToolResults: true,
+  noThinkPromptSuffix: "",
 }
 
 mock.module('./config.js', () => ({

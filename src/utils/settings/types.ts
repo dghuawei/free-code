@@ -1130,6 +1130,14 @@ export const SettingsSchema = lazySchema(() =>
             .describe(
               'Summarization call timeout. On timeout the raw output enters context unchanged. Default: 30000.',
             ),
+          noThinkPromptSuffix: z
+            .string()
+            .optional()
+            .describe(
+              'Appended to the summarizer system prompt to disable reasoning on models whose serving ' +
+                'ignores the thinking:disabled API flag. For Qwen3-family models use "/no_think". ' +
+                'Leave unset for Anthropic/OpenAI models. Default: empty.',
+            ),
         })
         .optional()
         .describe(

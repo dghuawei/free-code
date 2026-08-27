@@ -20,6 +20,8 @@ export type ToolOutputSummarizationConfig = {
   maxInputChars: number
   timeoutMs: number
   summarizeServerToolResults: boolean
+  /** Appended to the summarizer system prompt; Qwen3 soft switch is "/no_think" */
+  noThinkPromptSuffix: string
 }
 
 /**
@@ -40,5 +42,6 @@ export function getToolOutputSummarizationConfig(): ToolOutputSummarizationConfi
     maxInputChars: setting.maxInputChars ?? DEFAULT_MAX_INPUT_CHARS,
     timeoutMs: setting.timeoutMs ?? DEFAULT_TIMEOUT_MS,
     summarizeServerToolResults: setting.summarizeServerToolResults === true,
+    noThinkPromptSuffix: setting.noThinkPromptSuffix ?? '',
   }
 }

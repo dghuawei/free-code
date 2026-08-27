@@ -16,6 +16,8 @@ const FIXED_CONFIG = {
   ignoredTools: new Set<string>(['Task']),
   maxInputChars: 200_000,
   timeoutMs: 30_000,
+  summarizeServerToolResults: false,
+  noThinkPromptSuffix: '',
 }
 
 mock.module('../../services/toolResultSummarization/config.js', () => ({
@@ -103,8 +105,12 @@ beforeEach(() => {
 
 describe('maybeSummarizeToolResultBlock', () => {
   test('success returns a block whose content wraps the summary and file path', async () => {
-    sideQueryMock.mockResolvedValueOnce({
-      content: [{ type: 'text', text: 'Listed 400 files; all under src/.' }],
+    let seenOpts: Record<string, unknown> | undefined
+    sideQueryMock.mockImplementationOnce(async (opts: unknown) => {
+      seenOpts = opts as Record<string, unknown>
+      return {
+        content: [{ type: 'text', text: 'Listed 400 files; all under src/.' }],
+      }
     })
 
     const result = await maybeSummarizeToolResultBlock(baseParams())
@@ -120,6 +126,33 @@ describe('maybeSummarizeToolResultBlock', () => {
         'Full output (400 lines, 3.4KB) saved to: /session/tool-results/toolu_1.txt',
     )
     expect(persistMock).toHaveBeenCalledTimes(1)
+    // Thinking must be explicitly disabled: reasoning models (qwen & co)
+    // otherwise burn the whole max_tokens budget on reasoning and return
+    // zero text blocks — the silent-skip failure mode observed in production.
+    expect(seenOpts?.thinking).toBe(false)
+  })
+
+  test('noThinkPromptSuffix is appended to the system prompt (Qwen3 soft switch)', async () => {
+    let seenSystem: unknown
+    sideQueryMock.mockImplementationOnce(async (opts: unknown) => {
+      const o = opts as { system?: unknown }
+      seenSystem = Array.isArray(o.system)
+        ? (o.system as Array<{ type: string; text?: string }>)
+            .map(b => (b.type === 'text' ? b.text : ''))
+            .join('\n')
+        : o.system
+      return { content: [{ type: 'text', text: 'ok summary' }] }
+    })
+    FIXED_CONFIG.noThinkPromptSuffix = '/no_think'
+    try {
+      const params = baseParams()
+      const result = await maybeSummarizeToolResultBlock(params)
+      expect(result).toBeDefined()
+      expect(String(seenSystem)).toContain('compress tool outputs')
+      expect(String(seenSystem)).toEndWith('/no_think')
+    } finally {
+      FIXED_CONFIG.noThinkPromptSuffix = ''
+    }
   })
 
   test('sideQuery failure returns undefined (fail open)', async () => {

@@ -21,6 +21,7 @@ function getToolOutputSummarizationConfigForTests() {
     maxInputChars: 200_000,
     timeoutMs: 30_000,
     summarizeServerToolResults: false,
+    noThinkPromptSuffix: "",
   }
 }
 
