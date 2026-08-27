@@ -220,11 +220,17 @@ export async function maybeSummarizeToolResultBlock({
         // Make this failure mode visible: a 200-with-no-text response is the
         // signature of a reasoning model (thinking not disabled server-side)
         // or a gateway that drops text blocks. Without this line the skip is
-        // completely silent.
-        const blockTypes = response.content.map(b => b.type).join(', ')
+        // completely silent. The raw-response dump pinpoints which: it shows
+        // exactly what the gateway returned (block types, texts, usage) and
+        // the effective request knobs for this call.
+        const responseDump = JSON.stringify(response)
+          .slice(0, 600)
         logForDebugging(
-          `Summarizer returned no text for ${toolName} ` +
-            `(content blocks: [${blockTypes || 'none'}]) — keeping raw output`,
+          `Summarizer returned no text for ${toolName} — keeping raw output. ` +
+            `Request: model=${config.model} stream=${config.streaming} ` +
+            `max_tokens=${config.maxOutputTokens} thinking=disabled ` +
+            `suffix=${JSON.stringify(config.noThinkPromptSuffix)}. ` +
+            `Response: ${responseDump}`,
           { level: 'warn' },
         )
       }
