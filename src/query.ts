@@ -55,6 +55,7 @@ import {
   stripSignatureBlocks,
 } from './utils/messages.js'
 import { generateToolUseSummary } from './services/toolUseSummary/toolUseSummaryGenerator.js'
+import { maybeSummarizeServerToolResults } from './services/toolResultSummarization/serverToolResultSummarizer.js'
 import { prependUserContext, appendSystemContext } from './utils/api.js'
 import {
   createAttachmentMessage,
@@ -739,16 +740,31 @@ async function* queryLoop(
                 )
               }
             }
+            // Summarize provider-injected result blocks (compat-layer
+            // tool_result blocks, server-tool result blocks) ONCE, before
+            // the message is yielded or enters the per-turn array. The
+            // message is novel content — never part of a prior request — so
+            // this cannot cause a prompt-cache byte mismatch. Fail-open and
+            // main-thread-only inside maybeSummarizeServerToolResults.
+            const summarizedMessage = (await maybeSummarizeServerToolResults({
+              message,
+              parentAbortController: toolUseContext.abortController,
+              isSubagent: Boolean(toolUseContext.agentId),
+            })) as typeof message
             // Backfill tool_use inputs on a cloned message before yield so
             // SDK stream output and transcript serialization see legacy/derived
             // fields. The original `message` is left untouched for
             // assistantMessages.push below — it flows back to the API and
             // mutating it would break prompt caching (byte mismatch).
-            let yieldMessage: typeof message = message
-            if (message.type === 'assistant') {
+            let yieldMessage: typeof message = summarizedMessage
+            if (summarizedMessage.type === 'assistant') {
               let clonedContent: typeof message.message.content | undefined
-              for (let i = 0; i < message.message.content.length; i++) {
-                const block = message.message.content[i]!
+              for (
+                let i = 0;
+                i < summarizedMessage.message.content.length;
+                i++
+              ) {
+                const block = summarizedMessage.message.content[i]!
                 if (
                   block.type === 'tool_use' &&
                   typeof block.input === 'object' &&
@@ -772,7 +788,7 @@ async function* queryLoop(
                       k => !(k in originalInput),
                     )
                     if (addedFields) {
-                      clonedContent ??= [...message.message.content]
+                      clonedContent ??= [...summarizedMessage.message.content]
                       clonedContent[i] = { ...block, input: inputCopy }
                     }
                   }
@@ -780,8 +796,8 @@ async function* queryLoop(
               }
               if (clonedContent) {
                 yieldMessage = {
-                  ...message,
-                  message: { ...message.message, content: clonedContent },
+                  ...summarizedMessage,
+                  message: { ...summarizedMessage.message, content: clonedContent },
                 }
               }
             }
@@ -823,10 +839,10 @@ async function* queryLoop(
             if (!withheld) {
               yield yieldMessage
             }
-            if (message.type === 'assistant') {
-              assistantMessages.push(message)
+            if (summarizedMessage.type === 'assistant') {
+              assistantMessages.push(summarizedMessage)
 
-              const msgToolUseBlocks = message.message.content.filter(
+              const msgToolUseBlocks = summarizedMessage.message.content.filter(
                 content => content.type === 'tool_use',
               ) as ToolUseBlock[]
               if (msgToolUseBlocks.length > 0) {
@@ -839,7 +855,7 @@ async function* queryLoop(
                 !toolUseContext.abortController.signal.aborted
               ) {
                 for (const toolBlock of msgToolUseBlocks) {
-                  streamingToolExecutor.addTool(toolBlock, message)
+                  streamingToolExecutor.addTool(toolBlock, summarizedMessage)
                 }
               }
             }

@@ -20,6 +20,7 @@ function getToolOutputSummarizationConfigForTests() {
     ignoredTools: new Set(['Task']),
     maxInputChars: 200_000,
     timeoutMs: 30_000,
+    summarizeServerToolResults: false,
   }
 }
 

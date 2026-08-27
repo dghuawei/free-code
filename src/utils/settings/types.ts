@@ -1110,6 +1110,18 @@ export const SettingsSchema = lazySchema(() =>
               'Cap on characters of raw output sent to the summarizer prompt ' +
                 '(the persisted full output is unaffected). Default: 200000.',
             ),
+          summarizeServerToolResults: z
+            .boolean()
+            .optional()
+            .describe(
+              'Also summarize API-injected server-tool result blocks in assistant messages ' +
+                '(web_search_tool_result, mcp_tool_result, code_execution_tool_result, etc.). ' +
+                'Such blocks are replaced once with an empty result plus a summary text block. ' +
+                'Ignored via ignoredTools by short name (web_search, mcp, code_execution, web_fetch, ' +
+                'tool_search). Provider-compat layers that inject plain tool_result blocks into assistant ' +
+                'messages are summarized whenever the feature itself is enabled, regardless of this flag. ' +
+                'Default: false.',
+            ),
           timeoutMs: z
             .number()
             .int()

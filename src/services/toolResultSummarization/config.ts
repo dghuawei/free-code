@@ -19,6 +19,7 @@ export type ToolOutputSummarizationConfig = {
   ignoredTools: ReadonlySet<string>
   maxInputChars: number
   timeoutMs: number
+  summarizeServerToolResults: boolean
 }
 
 /**
@@ -38,5 +39,6 @@ export function getToolOutputSummarizationConfig(): ToolOutputSummarizationConfi
     ignoredTools: new Set(setting.ignoredTools ?? []),
     maxInputChars: setting.maxInputChars ?? DEFAULT_MAX_INPUT_CHARS,
     timeoutMs: setting.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+    summarizeServerToolResults: setting.summarizeServerToolResults === true,
   }
 }
