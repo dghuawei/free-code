@@ -90,6 +90,15 @@ function baseParams() {
     toolInput: { command: 'ls' },
     parentAbortController: new AbortController(),
     isSubagent: false,
+    fallbackQuery: undefined as
+      | ((args: {
+          userPrompt: string
+          systemPrompt: string
+          model: string
+          maxOutputTokens: number
+          signal: AbortSignal
+        }) => Promise<string>)
+      | undefined,
   }
 }
 
@@ -176,16 +185,44 @@ describe('maybeSummarizeToolResultBlock', () => {
     }
   })
 
-  test('sideQuery failure returns undefined (fail open)', async () => {
+  test('sideQuery failure falls back to main transport; both failing returns undefined', async () => {
     sideQueryMock.mockRejectedValueOnce(new Error('429 rate limited'))
     const params = baseParams()
+    params.fallbackQuery = async () => ''
 
     expect(await maybeSummarizeToolResultBlock(params)).toBeUndefined()
   })
 
-  test('empty summary text returns undefined', async () => {
+  test('empty sideQuery text + successful fallback yields a summary', async () => {
+    // The production failure mode behind OpenAI-compatible gateways: the
+    // direct Anthropic-protocol call returns 200 with empty text; the
+    // fallback through the main transport recovers.
+    sideQueryMock.mockResolvedValueOnce({ content: [{ type: 'text', text: '' }] })
+    let seenFallbackArgs: {
+      userPrompt: string
+      systemPrompt: string
+      model: string
+      maxOutputTokens: number
+    } | undefined
+    const params = baseParams()
+    params.fallbackQuery = async args => {
+      seenFallbackArgs = args
+      return 'Fallback summary: command printed 400 lines successfully.'
+    }
+    const result = await maybeSummarizeToolResultBlock(params)
+    expect(result).toBeDefined()
+    expect(result!.content).toContain('Fallback summary: command printed 400 lines successfully.')
+    expect(seenFallbackArgs!.model).toBe('test-model')
+    expect(seenFallbackArgs!.maxOutputTokens).toBe(1024)
+    expect(seenFallbackArgs!.userPrompt).toContain('Tool: Bash')
+    expect(seenFallbackArgs!.systemPrompt).toContain('compress tool outputs')
+  })
+
+  test('empty summary text with failing fallback returns undefined', async () => {
     sideQueryMock.mockResolvedValueOnce({ content: [{ type: 'text', text: '   ' }] })
-    expect(await maybeSummarizeToolResultBlock(baseParams())).toBeUndefined()
+    const params = baseParams()
+    params.fallbackQuery = async () => ''
+    expect(await maybeSummarizeToolResultBlock(params)).toBeUndefined()
   })
 
   test('persistence error returns undefined without calling sideQuery', async () => {

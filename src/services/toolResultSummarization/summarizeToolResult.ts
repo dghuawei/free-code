@@ -61,6 +61,72 @@ export type MaybeSummarizeToolResultParams = {
   parentAbortController: AbortController
   /** Subagent sidechains keep raw outputs — summarization is main-thread only */
   isSubagent: boolean
+  /**
+   * Overrides the attempt-2 transport (main-loop query path). Tests inject a
+   * stub; production leaves it undefined for the default lazy implementation.
+   */
+  fallbackQuery?: SummarizerFallbackQuery
+}
+
+/**
+ * Attempt 2 transport: runs the summarization through the main query path
+ * (queryModelWithoutStreaming). Injected for tests; the default uses dynamic
+ * imports so this module adds no static coupling to the api/claude chain —
+ * that chain transitively imports modules that tests mock, and a static
+ * import would break their partial mock exports.
+ */
+export type SummarizerFallbackQuery = (args: {
+  userPrompt: string
+  systemPrompt: string
+  model: string
+  maxOutputTokens: number
+  signal: AbortSignal
+}) => Promise<string>
+
+async function defaultFallbackQuery(args: {
+  userPrompt: string
+  systemPrompt: string
+  model: string
+  maxOutputTokens: number
+  signal: AbortSignal
+}): Promise<string> {
+  const [{ queryModelWithoutStreaming }, { getEmptyToolPermissionContext }, { createUserMessage }, { asSystemPrompt }] =
+    await Promise.all([
+      import('../../services/api/claude.js'),
+      import('../../Tool.js'),
+      import('../../utils/messages.js'),
+      import('../../utils/systemPromptType.js'),
+    ])
+  const response = await queryModelWithoutStreaming({
+    messages: [createUserMessage({ content: args.userPrompt })],
+    systemPrompt: asSystemPrompt([args.systemPrompt]),
+    thinkingConfig: { type: 'disabled' },
+    tools: [],
+    signal: args.signal,
+    options: {
+      getToolPermissionContext: async () => getEmptyToolPermissionContext(),
+      model: args.model,
+      toolChoice: undefined,
+      isNonInteractiveSession: false,
+      hasAppendSystemPrompt: false,
+      agents: [],
+      querySource: 'tool_result_summarization',
+      mcpTools: [],
+      maxOutputTokensOverride: args.maxOutputTokens,
+      skipCacheWrite: true,
+    },
+  })
+  if (response.isApiErrorMessage) return ''
+  return (
+    (response.message?.content ?? [])
+      .filter(
+        (block): block is { type: 'text'; text: string } =>
+          block.type === 'text',
+      )
+      .map(block => block.text)
+      .join('')
+      .trim() ?? ''
+  )
 }
 
 type SummarizationEligibility = {
@@ -141,6 +207,7 @@ export async function maybeSummarizeToolResultBlock({
   toolInput,
   parentAbortController,
   isSubagent,
+  fallbackQuery,
 }: MaybeSummarizeToolResultParams): Promise<ToolResultBlockParam | undefined> {
   const config = getToolOutputSummarizationConfig()
   const eligibility = getSummarizationEligibility(
@@ -179,26 +246,32 @@ export async function maybeSummarizeToolResultBlock({
       )
     }, config.timeoutMs)
 
-    let summaryText: string
+    const truncated = text.length > config.maxInputChars
+    const userPrompt = buildSummarizerUserMessage({
+      toolName,
+      toolInput,
+      output: truncated ? text.slice(0, config.maxInputChars) : text,
+      lineCount,
+      estimatedTokens,
+      truncated,
+    })
+    const systemPrompt = config.noThinkPromptSuffix
+      ? `${TOOL_OUTPUT_SUMMARY_SYSTEM_PROMPT}\n\n${config.noThinkPromptSuffix}`
+      : TOOL_OUTPUT_SUMMARY_SYSTEM_PROMPT
+
+    let summaryText = ''
+    // Attempt 1: sideQuery (direct Anthropic protocol). Fast path on
+    // first-party providers; on some OpenAI-compatible gateways this
+    // endpoint misbehaves (200-with-empty-text, or hangs when streamed).
     try {
-      const truncated = text.length > config.maxInputChars
       const response = await sideQuery({
         model: config.model,
-        system: config.noThinkPromptSuffix
-          ? `${TOOL_OUTPUT_SUMMARY_SYSTEM_PROMPT}\n\n${config.noThinkPromptSuffix}`
-          : TOOL_OUTPUT_SUMMARY_SYSTEM_PROMPT,
+        system: systemPrompt,
         skipSystemPromptPrefix: true,
         messages: [
           {
             role: 'user',
-            content: buildSummarizerUserMessage({
-              toolName,
-              toolInput,
-              output: truncated ? text.slice(0, config.maxInputChars) : text,
-              lineCount,
-              estimatedTokens,
-              truncated,
-            }),
+            content: userPrompt,
           },
         ],
         max_tokens: config.maxOutputTokens,
@@ -222,14 +295,13 @@ export async function maybeSummarizeToolResultBlock({
       if (!summaryText) {
         // Make this failure mode visible: a 200-with-no-text response is the
         // signature of a reasoning model (thinking not disabled server-side)
-        // or a gateway that drops text blocks. Without this line the skip is
-        // completely silent. The raw-response dump pinpoints which: it shows
-        // exactly what the gateway returned (block types, texts, usage) and
-        // the effective request knobs for this call.
+        // or a gateway that drops text blocks. The raw-response dump shows
+        // exactly what came back; the fallback below then retries via the
+        // main transport.
         const responseDump = JSON.stringify(response)
           .slice(0, 600)
         logForDebugging(
-          `Summarizer returned no text for ${toolName} — keeping raw output. ` +
+          `Summarizer returned no text for ${toolName} via sideQuery. ` +
             `Request: model=${config.model} stream=${config.streaming} ` +
             `max_tokens=${config.maxOutputTokens} thinking=disabled ` +
             `suffix=${JSON.stringify(config.noThinkPromptSuffix)}. ` +
@@ -237,8 +309,60 @@ export async function maybeSummarizeToolResultBlock({
           { level: 'warn' },
         )
       }
+    } catch (error) {
+      if (timedOut) {
+        logForDebugging(
+          `Summarizer sideQuery timed out after ${config.timeoutMs}ms for ${toolName} ` +
+            `(model=${config.model}, stream=${config.streaming})`,
+          { level: 'warn' },
+        )
+      } else {
+        logError(toError(error))
+      }
     } finally {
       clearTimeout(timeout)
+    }
+
+    // Attempt 2 (fallback): the main query transport. Forks that wrap the
+    // main loop in an OpenAI-compatible transport (where the gateway's
+    // native-Anthropic endpoint is broken) still get every tool result
+    // summarized — this is the exact path every conversation turn uses,
+    // so it is the most reliable route to the model. Fresh timeout budget.
+    if (!summaryText && !parentAbortController.signal.aborted) {
+      const fallbackAbort = createChildAbortController(parentAbortController)
+      let fallbackTimedOut = false
+      const fallbackTimeout = setTimeout(() => {
+        fallbackTimedOut = true
+        fallbackAbort.abort(
+          new Error('tool result summarization fallback timed out'),
+        )
+      }, config.timeoutMs)
+      try {
+        summaryText = await (fallbackQuery ?? defaultFallbackQuery)({
+          userPrompt,
+          systemPrompt,
+          model: config.model,
+          maxOutputTokens: config.maxOutputTokens,
+          signal: fallbackAbort.signal,
+        })
+        if (summaryText) {
+          logForDebugging(
+            `Summarized ${toolName} via main-transport fallback after sideQuery returned no text`,
+            { level: 'info' },
+          )
+        }
+      } catch (error) {
+        if (fallbackTimedOut) {
+          logForDebugging(
+            `Summarizer main-transport fallback timed out after ${config.timeoutMs}ms for ${toolName}`,
+            { level: 'warn' },
+          )
+        } else {
+          logError(toError(error))
+        }
+      } finally {
+        clearTimeout(fallbackTimeout)
+      }
     }
 
     if (!summaryText) return undefined
