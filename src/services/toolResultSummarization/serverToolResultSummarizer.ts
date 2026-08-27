@@ -26,6 +26,7 @@
 
 import { logEvent } from '../analytics/index.js'
 import { sanitizeToolNameForAnalytics } from '../analytics/metadata.js'
+import { logForDebugging } from '../../utils/debug.js'
 import type { ToolResultBlockParam } from '@anthropic-ai/sdk/resources/index.mjs'
 import {
   getSummarizationEligibility,
@@ -175,6 +176,15 @@ function isBlockSummarized(block: ContentBlock): boolean {
   return false
 }
 
+/** Per-block notification emitted after a successful replacement. */
+export type ServerToolResultSummarizedInfo = {
+  toolName: string
+  originalSizeChars: number
+  summarizedSizeChars: number
+  /** Path of the persisted raw output, when present in the replacement */
+  savedTo: string | undefined
+}
+
 export type MaybeSummarizeServerToolResultsParams = {
   /** The assistant message just received from the API stream */
   message: unknown
@@ -182,6 +192,13 @@ export type MaybeSummarizeServerToolResultsParams = {
   parentAbortController: AbortController
   /** Subagent sidechains skip — consistent with the client-tool summarizer */
   isSubagent: boolean
+  /**
+   * Invoked once per summarized block (after the replacement is committed to
+   * the returned message). Used by query.ts to surface a UI-visible,
+   * API-invisible informational system message — the transcript otherwise
+   * gives no signal that assistant-message blocks were replaced.
+   */
+  onSummarized?: (info: ServerToolResultSummarizedInfo) => void
 }
 
 /**
@@ -194,6 +211,7 @@ export async function maybeSummarizeServerToolResults({
   message,
   parentAbortController,
   isSubagent,
+  onSummarized,
 }: MaybeSummarizeServerToolResultsParams): Promise<unknown> {
   const config = getToolOutputSummarizationConfig()
   if (!config.enabled || isSubagent) return message
@@ -303,6 +321,21 @@ export async function maybeSummarizeServerToolResults({
       originalSizeBytes: p.text.length,
       summarizedSizeBytes: replacement.length,
     })
+    // Visible with -d/--debug — mirrors the client-tool summarizer's log so
+    // both paths are observable the same way. The onSummarized callback
+    // additionally surfaces a UI-visible line (see query.ts) without -d.
+    const savedTo = replacement.match(/saved to: (\S+)/)?.[1]
+    onSummarized?.({
+      toolName: p.toolName,
+      originalSizeChars: p.text.length,
+      summarizedSizeChars: replacement.length,
+      savedTo,
+    })
+    logForDebugging(
+      `Summarized server tool result (${p.toolName}) in assistant message: ` +
+        `${p.text.length} chars -> ${replacement.length} chars (saved to ${savedTo ?? 'session tool-results'})`,
+      { level: 'info' },
+    )
   }
   if (!contentChanged) return message
 

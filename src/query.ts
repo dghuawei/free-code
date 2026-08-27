@@ -55,7 +55,10 @@ import {
   stripSignatureBlocks,
 } from './utils/messages.js'
 import { generateToolUseSummary } from './services/toolUseSummary/toolUseSummaryGenerator.js'
-import { maybeSummarizeServerToolResults } from './services/toolResultSummarization/serverToolResultSummarizer.js'
+import {
+  maybeSummarizeServerToolResults,
+  type ServerToolResultSummarizedInfo,
+} from './services/toolResultSummarization/serverToolResultSummarizer.js'
 import { prependUserContext, appendSystemContext } from './utils/api.js'
 import {
   createAttachmentMessage,
@@ -746,11 +749,31 @@ async function* queryLoop(
             // message is novel content — never part of a prior request — so
             // this cannot cause a prompt-cache byte mismatch. Fail-open and
             // main-thread-only inside maybeSummarizeServerToolResults.
-            const summarizedMessage = (await maybeSummarizeServerToolResults({
-              message,
-              parentAbortController: toolUseContext.abortController,
-              isSubagent: Boolean(toolUseContext.agentId),
-            })) as typeof message
+            const serverSummaries: ServerToolResultSummarizedInfo[] = []
+            const summarizedMessage = (await maybeSummarizeServerToolResults(
+              {
+                message,
+                parentAbortController: toolUseContext.abortController,
+                isSubagent: Boolean(toolUseContext.agentId),
+                onSummarized: info => serverSummaries.push(info),
+              },
+            )) as typeof message
+            if (serverSummaries.length > 0) {
+              // UI-visible signal without -d. Informational system messages
+              // are filtered out by normalizeMessagesForAPI (never sent to
+              // the model), so this is cache-neutral.
+              const detail = serverSummaries
+                .map(
+                  s =>
+                    `${s.toolName}: ${s.originalSizeChars} → ${s.summarizedSizeChars} chars` +
+                    (s.savedTo ? ` (saved to ${s.savedTo})` : ''),
+                )
+                .join('; ')
+              yield createSystemMessage(
+                `Summarized injected tool result(s) for model context — ${detail}`,
+                'info',
+              )
+            }
             // Backfill tool_use inputs on a cloned message before yield so
             // SDK stream output and transcript serialization see legacy/derived
             // fields. The original `message` is left untouched for

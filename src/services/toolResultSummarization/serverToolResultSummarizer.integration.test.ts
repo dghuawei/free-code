@@ -228,6 +228,34 @@ describe('maybeSummarizeServerToolResults', () => {
     expect(seenPrompt).toContain('https://a')
   })
 
+  test('onSummarized reports per-block details for the UI signal', async () => {
+    sideQueryMock.mockResolvedValueOnce({
+      content: [
+        {
+          type: 'text',
+          text: 'summary body',
+        },
+      ],
+    })
+    const infos: Array<{
+      toolName: string
+      originalSizeChars: number
+      summarizedSizeChars: number
+      savedTo: string | undefined
+    }> = []
+    await maybeSummarizeServerToolResults({
+      message: assistantWithCompatBlob(),
+      parentAbortController: new AbortController(),
+      isSubagent: false,
+      onSummarized: info => infos.push(info),
+    })
+    expect(infos).toHaveLength(1)
+    expect(infos[0]!.toolName).toBe('server_tool_result')
+    expect(infos[0]!.originalSizeChars).toBe(2_000)
+    expect(infos[0]!.summarizedSizeChars).toBeGreaterThan(0)
+    expect(infos[0]!.savedTo).toBe('/session/tool-results/call_glm_1.txt')
+  })
+
   test('sideQuery failure keeps the message unchanged (fail open)', async () => {
     sideQueryMock.mockRejectedValueOnce(new Error('429'))
     const input = assistantWithCompatBlob()
