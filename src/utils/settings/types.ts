@@ -1097,7 +1097,8 @@ export const SettingsSchema = lazySchema(() =>
             .array(z.string())
             .optional()
             .describe(
-              'Tool names whose outputs are never summarized (e.g. ["Read", "Task"]). ' +
+              'Tool names whose outputs are never summarized (e.g. ["Task"]). ' +
+                'Tools that need verbatim output (Read) are always excluded automatically. ' +
                 'MCP tools use their mcp__server__tool name. Arrays from multiple settings sources are combined.',
             ),
           maxInputChars: z

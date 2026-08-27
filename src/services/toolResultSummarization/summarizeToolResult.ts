@@ -39,10 +39,22 @@ import {
   TOOL_OUTPUT_SUMMARY_TAG,
 } from './tags.js'
 
+/**
+ * Raw outputs below this size are never sent to the summarizer: the
+ * replacement wrapper (tags + saved-to path) alone costs ~200 chars, so no
+ * summary can shrink them. Must stay consistent with buildSummarizedContent.
+ */
+export const MIN_SUMMARIZABLE_RAW_CHARS = 300
+
 export type MaybeSummarizeToolResultParams = {
   /** The mapped tool_result block whose content may be summarized */
   toolResultBlock: ToolResultBlockParam
   toolName: string
+  /**
+   * The tool's declared maxResultSizeChars. Non-finite (e.g. Read) marks
+   * tools whose verbatim output the model must see — see eligibility check.
+   */
+  maxResultSizeChars: number
   /** The tool's parsed input, given to the summarizer for context */
   toolInput: unknown
   /** Turn-level controller; user cancellation aborts the summary call */
@@ -67,10 +79,18 @@ export function getSummarizationEligibility(
   toolName: string,
   config: ReturnType<typeof getToolOutputSummarizationConfig>,
   isSubagent: boolean,
+  maxResultSizeChars: number,
 ): SummarizationEligibility | null {
   if (!config.enabled || isSubagent) return null
   if (config.ignoredTools.has(toolName)) return null
   if (isToolResultContentEmpty(content)) return null
+
+  // Tools declaring Infinity (Read) need verbatim output — the model re-reads
+  // or edits files from this content, and a summary forces a wasteful re-read
+  // loop. Same exclusion the budget system applies (query.ts skipToolNames,
+  // built from !Number.isFinite(t.maxResultSizeChars)); also matches the
+  // persistence path's circularity rationale (toolResultStorage.ts).
+  if (!Number.isFinite(maxResultSizeChars)) return null
 
   // Extract the text the summarizer would see. Only string content or arrays
   // of purely text blocks qualify — anything else (images, mixed blocks)
@@ -98,6 +118,14 @@ export function getSummarizationEligibility(
     return null
   }
 
+  // Structural floor: the wrapper alone (tags + saved-to line with a real
+  // session path) costs ~200 chars, so no summary of output this small can
+  // beat the no-blowup guard downstream. Observed live: a 291-char output
+  // was persisted and side-queried, only for the 318-char summary to be
+  // discarded by the guard. Skipping here avoids the wasted API call and
+  // the orphaned persisted file.
+  if (text.length < MIN_SUMMARIZABLE_RAW_CHARS) return null
+
   return { text, lineCount, estimatedTokens }
 }
 
@@ -109,6 +137,7 @@ export function getSummarizationEligibility(
 export async function maybeSummarizeToolResultBlock({
   toolResultBlock,
   toolName,
+  maxResultSizeChars,
   toolInput,
   parentAbortController,
   isSubagent,
@@ -119,6 +148,7 @@ export async function maybeSummarizeToolResultBlock({
     toolName,
     config,
     isSubagent,
+    maxResultSizeChars,
   )
   if (!eligibility) return undefined
 
@@ -188,6 +218,12 @@ export async function maybeSummarizeToolResultBlock({
       lineCount,
       originalSize: text.length,
     })
+
+    // No-blowup guard: the wrapper (tags + saved-to path) has a fixed cost of
+    // a couple hundred chars, so near-threshold outputs can end up BIGGER as
+    // a "summary" (observed: 140-char seq output → 340-char summary). If the
+    // replacement doesn't shrink the context, keep the raw output.
+    if (replacement.length >= text.length) return undefined
 
     logEvent('tengu_tool_result_summarized', {
       toolName: sanitizeToolNameForAnalytics(toolName),

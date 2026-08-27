@@ -1416,6 +1416,7 @@ async function checkPermissionsAndCallTool(
       const summarizedBlock = await maybeSummarizeToolResultBlock({
         toolResultBlock: blockToProcess,
         toolName: tool.name,
+        maxResultSizeChars: tool.maxResultSizeChars,
         toolInput: input,
         parentAbortController: toolUseContext.abortController,
         isSubagent: Boolean(toolUseContext.agentId),

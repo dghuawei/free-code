@@ -82,6 +82,7 @@ function baseParams() {
       is_error: false,
     },
     toolName: 'Bash',
+    maxResultSizeChars: 30_000,
     toolInput: { command: 'ls' },
     parentAbortController: new AbortController(),
     isSubagent: false,
@@ -169,5 +170,36 @@ describe('maybeSummarizeToolResultBlock', () => {
     params.toolName = 'Task'
     expect(await maybeSummarizeToolResultBlock(params)).toBeUndefined()
     expect(persistMock).toHaveBeenCalledTimes(0)
+  })
+
+  test('non-finite maxResultSizeChars (Read) skips entirely', async () => {
+    const params = baseParams()
+    params.toolName = 'Read'
+    params.maxResultSizeChars = Number.POSITIVE_INFINITY
+    expect(await maybeSummarizeToolResultBlock(params)).toBeUndefined()
+    expect(persistMock).toHaveBeenCalledTimes(0)
+    expect(sideQueryMock).toHaveBeenCalledTimes(0)
+  })
+
+  test('no-blowup guard: summary larger than raw output keeps raw', async () => {
+    // Observed in the wild: a verbose summary of a small-but-over-threshold
+    // output. The sideQuery succeeds, but the replacement must not enter
+    // context if it isn't smaller. Content must be eligible under the mocked
+    // config (lineThreshold 300): 311 one-char lines = 620 chars raw, and a
+    // 600-char summary + ~180-char wrapper (~780) loses to it.
+    const verboseSummary = 'x'.repeat(600)
+    sideQueryMock.mockResolvedValueOnce({
+      content: [{ type: 'text', text: verboseSummary }],
+    })
+    const params = baseParams()
+    params.toolResultBlock = {
+      ...params.toolResultBlock,
+      content: 'x\n'.repeat(310),
+    }
+    const result = await maybeSummarizeToolResultBlock(params)
+    expect(result).toBeUndefined()
+    // The call happened (not skipped by floor or eligibility) — the guard
+    // discarded the replacement.
+    expect(persistMock).toHaveBeenCalledTimes(1)
   })
 })

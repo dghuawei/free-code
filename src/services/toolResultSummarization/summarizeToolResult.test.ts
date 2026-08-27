@@ -39,6 +39,7 @@ describe('getSummarizationEligibility', () => {
       'Bash',
       config,
       false,
+      30_000,
     )
     expect(eligibility).not.toBeNull()
     // split('\n') counts the empty string after the trailing newline
@@ -48,44 +49,73 @@ describe('getSummarizationEligibility', () => {
 
   test('single huge line triggers via token threshold', () => {
     const text = 'x'.repeat(2500 * 4 + 1)
-    const eligibility = getSummarizationEligibility(text, 'Bash', config, false)
+    const eligibility = getSummarizationEligibility(text, 'Bash', config, false, 30_000)
     expect(eligibility).not.toBeNull()
     expect(eligibility!.lineCount).toBe(1)
   })
 
   test('short output is not summarized', () => {
     expect(
-      getSummarizationEligibility('short output', 'Bash', config, false),
+      getSummarizationEligibility('short output', 'Bash', config, false, 30_000),
     ).toBeNull()
   })
 
   test('both thresholds under limit is not summarized', () => {
     // 299 lines, ~2.4 tokens — below both.
     const text = Array.from({ length: 299 }, () => 'ok').join('\n')
-    expect(getSummarizationEligibility(text, 'Bash', config, false)).toBeNull()
+    expect(getSummarizationEligibility(text, 'Bash', config, false, 30_000)).toBeNull()
   })
 
   test('either threshold exceeded triggers (lines within, tokens over)', () => {
     // 10 lines but each 2000 chars → ~5000 tokens.
     const text = Array.from({ length: 10 }, () => 'y'.repeat(2000)).join('\n')
-    expect(getSummarizationEligibility(text, 'Bash', config, false)).not.toBeNull()
+    expect(getSummarizationEligibility(text, 'Bash', config, false, 30_000)).not.toBeNull()
+  })
+
+  test('below MIN_SUMMARIZABLE_RAW_CHARS returns null even over threshold', () => {
+    // Over the line threshold but only 75 chars — the ~200-char wrapper
+    // makes any summary a net blowup, so skip before any I/O.
+    const lowLineConfig = { ...config, lineThreshold: 20 }
+    const text = 'ab\n'.repeat(25)
+    expect(text.length).toBeLessThan(300)
+    expect(
+      getSummarizationEligibility(text, 'Bash', lowLineConfig, false, 30_000),
+    ).toBeNull()
   })
 
   test('disabled config returns null', () => {
     expect(
-      getSummarizationEligibility('a\n'.repeat(400), 'Bash', { ...config, enabled: false }, false),
+      getSummarizationEligibility('a\n'.repeat(400), 'Bash', { ...config, enabled: false }, false, 30_000),
     ).toBeNull()
+  })
+
+  test('non-finite maxResultSizeChars (Read) returns null — model needs verbatim file content', () => {
+    expect(
+      getSummarizationEligibility(
+        'a\n'.repeat(400),
+        'Read',
+        config,
+        false,
+        Number.POSITIVE_INFINITY,
+      ),
+    ).toBeNull()
+  })
+
+  test('finite maxResultSizeChars summarizes as before', () => {
+    expect(
+      getSummarizationEligibility('a\n'.repeat(400), 'Bash', config, false, 30_000),
+    ).not.toBeNull()
   })
 
   test('subagent results return null', () => {
     expect(
-      getSummarizationEligibility('a\n'.repeat(400), 'Bash', config, true),
+      getSummarizationEligibility('a\n'.repeat(400), 'Bash', config, true, 30_000),
     ).toBeNull()
   })
 
   test('ignored tool returns null', () => {
     expect(
-      getSummarizationEligibility('a\n'.repeat(400), 'Task', config, false),
+      getSummarizationEligibility('a\n'.repeat(400), 'Task', config, false, 30_000),
     ).toBeNull()
   })
 
@@ -100,15 +130,16 @@ describe('getSummarizationEligibility', () => {
         'mcp__github__list_issues',
         mcpConfig,
         false,
+        30_000,
       ),
     ).toBeNull()
   })
 
   test('empty content returns null', () => {
-    expect(getSummarizationEligibility('', 'Bash', config, false)).toBeNull()
-    expect(getSummarizationEligibility('   \n  ', 'Bash', config, false)).toBeNull()
+    expect(getSummarizationEligibility('', 'Bash', config, false, 30_000)).toBeNull()
+    expect(getSummarizationEligibility('   \n  ', 'Bash', config, false, 30_000)).toBeNull()
     expect(
-      getSummarizationEligibility(undefined, 'Bash', config, false),
+      getSummarizationEligibility(undefined, 'Bash', config, false, 30_000),
     ).toBeNull()
   })
 
@@ -125,7 +156,7 @@ describe('getSummarizationEligibility', () => {
       },
     ]
     expect(
-      getSummarizationEligibility(content, 'Bash', config, false),
+      getSummarizationEligibility(content, 'Bash', config, false, 30_000),
     ).toBeNull()
   })
 
@@ -136,6 +167,7 @@ describe('getSummarizationEligibility', () => {
         'Bash',
         config,
         false,
+        30_000,
       ),
     ).toBeNull()
     expect(
@@ -144,6 +176,7 @@ describe('getSummarizationEligibility', () => {
         'Bash',
         config,
         false,
+        30_000,
       ),
     ).toBeNull()
   })
@@ -154,7 +187,7 @@ describe('getSummarizationEligibility', () => {
       { type: 'text' as const, text: longText },
       { type: 'text' as const, text: 'tail' },
     ]
-    const eligibility = getSummarizationEligibility(content, 'Bash', config, false)
+    const eligibility = getSummarizationEligibility(content, 'Bash', config, false, 30_000)
     expect(eligibility).not.toBeNull()
     expect(eligibility!.text).toBe(`${longText}\ntail`)
   })
@@ -206,6 +239,7 @@ test('MaybeSummarizeToolResultParams carries the wired call-site fields', () => 
   const params: MaybeSummarizeToolResultParams = {
     toolResultBlock: blockWithContent('ok'),
     toolName: 'Bash',
+    maxResultSizeChars: 30_000,
     toolInput: { command: 'ls' },
     parentAbortController: new AbortController(),
     isSubagent: false,
