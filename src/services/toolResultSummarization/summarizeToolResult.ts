@@ -31,6 +31,7 @@ import {
   type PersistToolResultError,
 } from '../../utils/toolResultStorage.js'
 import { getToolOutputSummarizationConfig } from './config.js'
+import { writeLiveToolOutputView } from './liveView.js'
 import {
   buildSummarizerUserMessage,
   TOOL_OUTPUT_SUMMARY_SYSTEM_PROMPT,
@@ -373,6 +374,7 @@ export async function maybeSummarizeToolResultBlock({
       persisted,
       lineCount,
       originalSize: text.length,
+      originalTokens: estimatedTokens,
     })
 
     // No-blowup guard: the wrapper (tags + saved-to path) has a fixed cost of
@@ -380,6 +382,13 @@ export async function maybeSummarizeToolResultBlock({
     // "summary" (observed: 140-char seq output → 340-char summary). If the
     // replacement doesn't shrink the context, keep the raw output.
     if (replacement.length >= text.length) return undefined
+
+    await writeLiveToolOutputView({
+      stage: 'summary',
+      toolName,
+      content: summaryText,
+      originalTokens: estimatedTokens,
+    })
 
     const summaryCopyPath = await saveSummaryCopy(
       persisted.filepath,
@@ -425,17 +434,23 @@ export function buildSummarizedContent({
   persisted,
   lineCount,
   originalSize,
+  originalTokens,
 }: {
   summaryText: string
   persisted: PersistedToolResult
   lineCount: number
   originalSize: number
+  originalTokens: number
 }): string {
+  const summarizedTokens = Math.ceil(
+    (summaryText.length + persisted.filepath.length + 200) / BYTES_PER_TOKEN,
+  )
   return (
     `${TOOL_OUTPUT_SUMMARY_TAG}\n` +
     `${summaryText}\n` +
     `${TOOL_OUTPUT_SUMMARY_CLOSING_TAG}\n` +
-    `Full output (${lineCount} lines, ${formatFileSize(originalSize)}) saved to: ${persisted.filepath}`
+    `Full output (${lineCount} lines, ${formatFileSize(originalSize)}) saved to: ${persisted.filepath}\n` +
+    `Estimated tokens: ${originalTokens} -> ${summarizedTokens}`
   )
 }
 

@@ -104,6 +104,7 @@ import {
 } from '../../utils/toolErrors.js'
 import { processPreMappedToolResultBlock } from '../../utils/toolResultStorage.js'
 import { maybeSummarizeToolResultBlock } from '../toolResultSummarization/summarizeToolResult.js'
+import { writeLiveToolOutputView } from '../toolResultSummarization/liveView.js'
 import {
   extractDiscoveredToolNames,
   isToolSearchEnabledOptimistic,
@@ -1407,6 +1408,16 @@ async function checkPermissionsAndCallTool(
       const blockToProcess =
         preMappedBlock ??
         tool.mapToolResultToToolResultBlockParam(toolUseResult, toolUseID)
+
+      // Live demo view: every tool result's raw content lands in
+      // live-view.txt before summarization runs, so watching the file shows
+      // raw output first and then the summary rewrite. No-op unless
+      // toolOutputSummarization.liveViewFile is enabled.
+      await writeLiveToolOutputView({
+        stage: 'raw',
+        toolName: tool.name,
+        content: blockToProcess.content,
+      })
 
       // Opportunistic summarization of long outputs runs BEFORE the
       // persistence pass: a successful summary is short, tagged content the

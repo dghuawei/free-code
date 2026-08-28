@@ -26,6 +26,7 @@
 
 import { logEvent } from '../analytics/index.js'
 import { sanitizeToolNameForAnalytics } from '../analytics/metadata.js'
+import { BYTES_PER_TOKEN } from '../../constants/toolLimits.js'
 import { logForDebugging } from '../../utils/debug.js'
 import type { ToolResultBlockParam } from '@anthropic-ai/sdk/resources/index.mjs'
 import {
@@ -181,6 +182,10 @@ export type ServerToolResultSummarizedInfo = {
   toolName: string
   originalSizeChars: number
   summarizedSizeChars: number
+  /** Char-based token estimate of the original block */
+  originalTokens: number
+  /** Char-based token estimate of the replacement */
+  summarizedTokens: number
   /** Path of the persisted raw output, when present in the replacement */
   savedTo: string | undefined
 }
@@ -329,6 +334,8 @@ export async function maybeSummarizeServerToolResults({
       toolName: p.toolName,
       originalSizeChars: p.text.length,
       summarizedSizeChars: replacement.length,
+      originalTokens: Math.ceil(p.text.length / BYTES_PER_TOKEN),
+      summarizedTokens: Math.ceil(replacement.length / BYTES_PER_TOKEN),
       savedTo,
     })
     logForDebugging(

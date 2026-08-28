@@ -8,7 +8,6 @@ import { filterToolProgressMessages, type Tool, type Tools } from '../../../Tool
 import type { NormalizedUserMessage, ProgressMessage } from '../../../types/message.js';
 import { deleteClassifierApproval, getClassifierApproval, getYoloClassifierApproval } from '../../../utils/classifierApprovals.js';
 import type { buildMessageLookups } from '../../../utils/messages.js';
-import { TOOL_OUTPUT_SUMMARY_TAG } from '../../../services/toolResultSummarization/tags.js';
 import { MessageResponse } from '../../MessageResponse.js';
 import { HookProgressMessage } from '../HookProgressMessage.js';
 type Props = {
@@ -32,27 +31,11 @@ type Props = {
  * model actually received a summary. Structural access + runtime guards
  * because the transcript path may deserialize without types.
  */
-export function getSummarizedOutputPath(
-  message: NormalizedUserMessage,
-  toolUseID: string,
-): string | null {
-  const content = (message as { message?: { content?: unknown } }).message
-    ?.content;
-  if (!Array.isArray(content)) return null;
-  const block = content.find(
-    (b: { type?: string; tool_use_id?: string; content?: unknown }) =>
-      b?.type === 'tool_result' && b?.tool_use_id === toolUseID,
-  );
-  const blockContent = block?.content;
-  if (
-    typeof blockContent !== 'string' ||
-    !blockContent.startsWith(TOOL_OUTPUT_SUMMARY_TAG)
-  ) {
-    return null;
-  }
-  const match = blockContent.match(/saved to: (.+)$/m);
-  return match?.[1] ?? '';
-}
+export {
+  getSummarizedOutputPath,
+  getSummarizedTokenDelta,
+} from '../../../services/toolResultSummarization/badgeParsing.js';
+import { getSummarizedOutputPath, getSummarizedTokenDelta } from '../../../services/toolResultSummarization/badgeParsing.js';
 
 /** Keep the badge to one terminal line for very long session paths. */
 function truncatePathForBadge(path: string): string {
@@ -121,13 +104,18 @@ export function UserToolSuccessMessage({
   // dot gutter) holds — otherwise tables wrap their box-drawing chars.
   const rendersAsAssistantText = tool.userFacingName(undefined) === '';
   const summarizedOutputPath = getSummarizedOutputPath(message, toolUseID);
+  const summarizedTokenDelta = getSummarizedTokenDelta(message, toolUseID);
   return <Box flexDirection="column">
       <Box flexDirection="column" width={rendersAsAssistantText ? undefined : width}>
         {renderedMessage}
         {summarizedOutputPath !== null ? <MessageResponse height={1}>
                 <Text dimColor>
                   <Text color="success">{figures.tick}</Text>
-                  {' Summarized for model context \u00b7 full output: '}
+                  {' Summarized for model context'}
+                  {summarizedTokenDelta !== null
+                    ? ` \u00b7 ${summarizedTokenDelta} tokens`
+                    : ''}
+                  {' \u00b7 full output: '}
                   {summarizedOutputPath
                     ? truncatePathForBadge(summarizedOutputPath)
                     : 'saved to session tool-results'}

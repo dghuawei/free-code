@@ -765,7 +765,7 @@ async function* queryLoop(
               const detail = serverSummaries
                 .map(
                   s =>
-                    `${s.toolName}: ${s.originalSizeChars} → ${s.summarizedSizeChars} chars` +
+                    `${s.toolName}: ${s.originalTokens} -> ${s.summarizedTokens} tokens (${s.originalSizeChars} → ${s.summarizedSizeChars} chars)` +
                     (s.savedTo ? ` (saved to ${s.savedTo})` : ''),
                 )
                 .join('; ')

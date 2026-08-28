@@ -210,13 +210,15 @@ describe('buildSummarizedContent', () => {
       },
       lineCount: 350,
       originalSize: 12_000,
+      originalTokens: 3_000,
     })
 
     expect(content).toBe(
       '<tool-output-summary>\n' +
         'Command succeeded; listed 3 files.\n' +
         '</tool-output-summary>\n' +
-        'Full output (350 lines, 11.7KB) saved to: /tmp/session/tool-results/toolu_abc.txt',
+        'Full output (350 lines, 11.7KB) saved to: /tmp/session/tool-results/toolu_abc.txt\n' +
+        'Estimated tokens: 3000 -> 69',
     )
   })
 
@@ -232,6 +234,7 @@ describe('buildSummarizedContent', () => {
       },
       lineCount: 10,
       originalSize: 1000,
+      originalTokens: 250,
     })
     expect(content.startsWith('<tool-output-summary>')).toBe(true)
   })

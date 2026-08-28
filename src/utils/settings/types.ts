@@ -1156,6 +1156,14 @@ export const SettingsSchema = lazySchema(() =>
                 'populate response content on streamed calls (observed with reasoning models behind ' +
                 'OpenAI-compatible bridges). Default: false.',
             ),
+          liveViewFile: z
+            .boolean()
+            .optional()
+            .describe(
+              'Demo/debug aid: rewrite <session>/tool-results/live-view.txt with each tool result ' +
+                '(raw) and, once available, its summary — full rewrite per stage, so watching the ' +
+                'file shows the raw-to-summary cycle. Default: false.',
+            ),
         })
         .optional()
         .describe(

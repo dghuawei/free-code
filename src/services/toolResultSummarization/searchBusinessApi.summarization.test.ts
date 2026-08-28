@@ -75,6 +75,7 @@ mock.module('../../utils/toolResultStorage.js', () => ({
   isToolResultContentEmpty: (content: unknown) =>
     !content || (typeof content === 'string' && content.trim() === ''),
   persistToolResult: persistMock,
+  getToolResultsDir: () => '/session/tool-results',
 }))
 
 const { maybeSummarizeToolResultBlock } = await import(

@@ -27,6 +27,8 @@ export type ToolOutputSummarizationConfig = {
   maxOutputTokens: number
   /** Stream the summarizer call; for gateways that only populate content on streams */
   streaming: boolean
+  /** Rewrite <session>/tool-results/live-view.txt per stage (raw, then summary) */
+  liveViewFile?: boolean
 }
 
 /**
@@ -50,5 +52,6 @@ export function getToolOutputSummarizationConfig(): ToolOutputSummarizationConfi
     noThinkPromptSuffix: setting.noThinkPromptSuffix ?? '',
     maxOutputTokens: setting.maxOutputTokens ?? DEFAULT_MAX_OUTPUT_TOKENS,
     streaming: setting.streaming === true,
+    liveViewFile: setting.liveViewFile === true,
   }
 }

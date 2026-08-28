@@ -23,6 +23,7 @@ const FIXED_CONFIG = {
   noThinkPromptSuffix: '',
   maxOutputTokens: 1024,
   streaming: false,
+  liveViewFile: false,
 }
 
 mock.module('../../services/toolResultSummarization/config.js', () => ({
@@ -45,6 +46,8 @@ mock.module('../../utils/sideQuery.js', () => ({
   sideQuery: sideQueryMock,
 }))
 
+let liveDir = '/session/tool-results'
+
 const persistMock = mock(async () => ({
   filepath: '/session/tool-results/toolu_1.txt',
   originalSize: 10_000,
@@ -66,6 +69,7 @@ mock.module('../../utils/toolResultStorage.js', () => ({
   isToolResultContentEmpty: (content: unknown) =>
     !content || (typeof content === 'string' && content.trim() === ''),
   persistToolResult: persistMock,
+  getToolResultsDir: () => liveDir,
   PERSISTED_OUTPUT_TAG: '<persisted-output>',
   PERSISTED_OUTPUT_CLOSING_TAG: '</persisted-output>',
   TOOL_RESULTS_SUBDIR: 'tool-results',
@@ -137,7 +141,8 @@ describe('maybeSummarizeToolResultBlock', () => {
       '<tool-output-summary>\n' +
         'Listed 400 files; all under src/.\n' +
         '</tool-output-summary>\n' +
-        'Full output (400 lines, 3.4KB) saved to: /session/tool-results/toolu_1.txt',
+        'Full output (400 lines, 3.4KB) saved to: /session/tool-results/toolu_1.txt\n' +
+        'Estimated tokens: 873 -> 67',
     )
     expect(persistMock).toHaveBeenCalledTimes(1)
     // Thinking must be explicitly disabled: reasoning models (qwen & co)
@@ -168,6 +173,41 @@ describe('maybeSummarizeToolResultBlock', () => {
     expect(saved).toBe('Concise digest of the 400 lines.')
     // Raw output is left untouched — the copy is additive only
     expect(await readFile(rawPath, 'utf-8')).toBe(LONG_OUTPUT)
+  })
+
+  test('live view file: raw stage overwrite, then full rewrite with summary + token delta', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'liveview-'))
+    liveDir = dir
+    FIXED_CONFIG.liveViewFile = true
+    const { writeLiveToolOutputView } = await import('./liveView.js')
+    try {
+      // Stage 1: raw write for EVERY tool result (toolExecution wiring);
+      // a previous raw result is fully clobbered by the next one.
+      await writeLiveToolOutputView({
+        stage: 'raw',
+        toolName: 'OtherTool',
+        content: 'previous short output',
+      })
+      let live = await readFile(join(dir, 'live-view.txt'), 'utf-8')
+      expect(live).toContain('OtherTool · RAW')
+      expect(live).toContain('previous short output')
+
+      // Stage 2: summarizer rewrite — header names the tool, the token
+      // delta, and the file holds only the summary text.
+      sideQueryMock.mockImplementationOnce(async () => ({
+        content: [{ type: 'text', text: 'Digest of the raw output.' }],
+      }))
+      const result = await maybeSummarizeToolResultBlock(baseParams())
+      expect(result).toBeDefined()
+      live = await readFile(join(dir, 'live-view.txt'), 'utf-8')
+      expect(live.startsWith('=== ')).toBe(true)
+      expect(live).toContain('Bash · SUMMARY (~873 -> ~')
+      expect(live).toContain('Digest of the raw output.')
+      expect(live).not.toContain('previous short output')
+    } finally {
+      FIXED_CONFIG.liveViewFile = false
+      liveDir = '/session/tool-results'
+    }
   })
 
   test('reasoning-gateway workarounds: maxOutputTokens and streaming reach sideQuery', async () => {

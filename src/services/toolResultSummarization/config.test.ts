@@ -31,4 +31,8 @@ describe('getToolOutputSummarizationConfig', () => {
     expect(DEFAULT_MAX_INPUT_CHARS).toBe(200_000)
     expect(DEFAULT_TIMEOUT_MS).toBe(30_000)
   })
+
+  test('live view file is opt-in', () => {
+    expect(getToolOutputSummarizationConfig().liveViewFile).toBe(false)
+  })
 })
