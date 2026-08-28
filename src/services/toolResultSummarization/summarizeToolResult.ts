@@ -12,6 +12,7 @@
  */
 
 import type { ToolResultBlockParam } from '@anthropic-ai/sdk/resources/index.mjs'
+import { writeFile } from 'node:fs/promises'
 import { BYTES_PER_TOKEN } from '../../constants/toolLimits.js'
 import { logEvent } from '../analytics/index.js'
 import { sanitizeToolNameForAnalytics } from '../analytics/metadata.js'
@@ -375,10 +376,15 @@ export async function maybeSummarizeToolResultBlock({
     })
 
     // No-blowup guard: the wrapper (tags + saved-to path) has a fixed cost of
-    // a couple hundred chars, so near-threshold outputs can end up BIGGER as
-    // a "summary" (observed: 140-char seq output → 340-char summary). If the
+    // a couple hundred chars, so near-threshold outputs can end up BIGGER as a
+    // "summary" (observed: 140-char seq output → 340-char summary). If the
     // replacement doesn't shrink the context, keep the raw output.
     if (replacement.length >= text.length) return undefined
+
+    const summaryCopyPath = await saveSummaryCopy(
+      persisted.filepath,
+      summaryText,
+    )
 
     logEvent('tengu_tool_result_summarized', {
       toolName: sanitizeToolNameForAnalytics(toolName),
@@ -391,7 +397,7 @@ export async function maybeSummarizeToolResultBlock({
     // not the raw output (the terminal UI still renders the raw output from
     // toolUseResult by design).
     logForDebugging(
-      `Summarized ${toolName} output: ${text.length} chars / ${lineCount} lines -> ${replacement.length} chars (saved to ${persisted.filepath})`,
+      `Summarized ${toolName} output: ${text.length} chars / ${lineCount} lines -> ${replacement.length} chars (raw saved to ${persisted.filepath}${summaryCopyPath ? `, summary copy: ${summaryCopyPath}` : ''})`,
       { level: 'info' },
     )
 
@@ -437,4 +443,32 @@ function isPersistError(
   result: PersistedToolResult | PersistToolResultError,
 ): result is PersistToolResultError {
   return 'error' in result
+}
+
+/**
+ * Debug aid: write the exact summary text that entered the model context
+ * next to the persisted raw output as "<name>_sum.<ext>" (e.g.
+ * toolu_1_sum.txt), so raw vs summarized can be diffed offline. Fail-open —
+ * a write failure never blocks summarization. Returns the path written, or
+ * undefined on failure.
+ */
+async function saveSummaryCopy(
+  rawFilepath: string,
+  summaryText: string,
+): Promise<string | undefined> {
+  const dot = rawFilepath.lastIndexOf('.')
+  const summaryPath =
+    dot > 0
+      ? `${rawFilepath.slice(0, dot)}_sum${rawFilepath.slice(dot)}`
+      : `${rawFilepath}_sum`
+  try {
+    await writeFile(summaryPath, summaryText, 'utf-8')
+    return summaryPath
+  } catch (error) {
+    logForDebugging(
+      `Failed to save summarized output copy to ${summaryPath}: ${toError(error).message}`,
+      { level: 'warn' },
+    )
+    return undefined
+  }
 }

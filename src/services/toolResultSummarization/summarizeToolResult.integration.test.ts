@@ -7,6 +7,9 @@
  * sibling test files.
  */
 import { afterAll, beforeEach, describe, expect, mock, test } from 'bun:test'
+import { mkdtemp, readFile, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 
 const FIXED_CONFIG = {
   enabled: true,
@@ -141,6 +144,30 @@ describe('maybeSummarizeToolResultBlock', () => {
     // otherwise burn the whole max_tokens budget on reasoning and return
     // zero text blocks — the silent-skip failure mode observed in production.
     expect(seenOpts?.thinking).toBe(false)
+  })
+
+  test('summary copy is written next to the persisted raw output as <name>_sum.<ext>', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'sumcopy-'))
+    const rawPath = join(dir, 'toolu_1.txt')
+    await writeFile(rawPath, LONG_OUTPUT, 'utf-8')
+    persistMock.mockImplementationOnce(async () => ({
+      filepath: rawPath,
+      originalSize: LONG_OUTPUT.length,
+      isJson: false,
+      preview: '...',
+      hasMore: true,
+    }))
+    sideQueryMock.mockImplementationOnce(async () => ({
+      content: [{ type: 'text', text: 'Concise digest of the 400 lines.' }],
+    }))
+
+    const result = await maybeSummarizeToolResultBlock(baseParams())
+
+    expect(result).toBeDefined()
+    const saved = await readFile(join(dir, 'toolu_1_sum.txt'), 'utf-8')
+    expect(saved).toBe('Concise digest of the 400 lines.')
+    // Raw output is left untouched — the copy is additive only
+    expect(await readFile(rawPath, 'utf-8')).toBe(LONG_OUTPUT)
   })
 
   test('reasoning-gateway workarounds: maxOutputTokens and streaming reach sideQuery', async () => {
