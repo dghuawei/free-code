@@ -182,7 +182,9 @@ describe('maybeSummarizeToolResultBlock', () => {
     const { writeLiveToolOutputView } = await import('./liveView.js')
     try {
       // Stage 1: raw write for EVERY tool result (toolExecution wiring);
-      // a previous raw result is fully clobbered by the next one.
+      // a previous raw result is fully clobbered by the next one. The
+      // directory does not exist yet — first-write-of-session must create
+      // it (observed ENOENT before persistToolResult ran).
       await writeLiveToolOutputView({
         stage: 'raw',
         toolName: 'OtherTool',

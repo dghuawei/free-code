@@ -200,11 +200,22 @@ export async function countMessagesTokensWithAPI(
   })
 }
 
+// CJK ideographs, kana, Hangul, full-width forms, and CJK punctuation.
+// These scripts tokenize at roughly ONE token per character on modern BPE
+// vocabularies (qwen/GLM included), versus ~4 chars/token for Latin text.
+const CJK_CHAR = /[\u1100-\u11FF\u2E80-\u9FFF\uA960-\uA97F\uAC00-\uD7FF\uF900-\uFAFF\uFE30-\uFE4F\uFF00-\uFFEF]/g
+
 export function roughTokenCountEstimation(
   content: string,
   bytesPerToken: number = 4,
 ): number {
-  return Math.round(content.length / bytesPerToken)
+  const cjkChars = content.match(CJK_CHAR)?.length ?? 0
+  const otherChars = content.length - cjkChars
+  // Counting CJK content at the Latin ratio underestimates Chinese-heavy
+  // conversations several-fold, delaying autocompact until real prompts
+  // already exceed the context window (observed: estimate 25.5k vs real
+  // gateway prompt 34.3k at the same turn).
+  return Math.round(cjkChars + otherChars / bytesPerToken)
 }
 
 /**

@@ -13,8 +13,8 @@
  * always reflects exactly one stage of one result, which is the point.
  * Fail-open: write errors are logged and never affect tool results.
  */
-import { writeFile } from 'node:fs/promises'
-import { join } from 'node:path'
+import { mkdir, writeFile } from 'node:fs/promises'
+import { dirname, join } from 'node:path'
 import { logForDebugging } from '../../utils/debug.js'
 import { toError } from '../../utils/errors.js'
 import { getToolResultsDir } from '../../utils/toolResultStorage.js'
@@ -77,6 +77,10 @@ export async function writeLiveToolOutputView({
       : `=== ${new Date().toISOString()} · ${toolName} · RAW (${text.length} chars, ~${tokens} tokens) ===`
   const filepath = join(getToolResultsDir(), LIVE_VIEW_FILENAME)
   try {
+    // First write of a session can precede the first persistToolResult,
+    // which is what normally creates the directory (observed: ENOENT on
+    // the raw stage of the very first tool result).
+    await mkdir(dirname(filepath), { recursive: true })
     await writeFile(filepath, `${header}\n${text}\n`, 'utf-8')
     return filepath
   } catch (error) {
